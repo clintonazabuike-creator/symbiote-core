@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Symbiote Workspace v2.2.0</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            background: #070708; 
+            color: #39ff14; 
+            font-family: monospace; 
+            height: 100vh; 
+            height: 100dvh; 
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+        }
+        header { padding: 12px; background: #0d0d11; border-bottom: 1px solid #222; text-align: center; font-size: 12px; font-weight: bold; letter-spacing: 1px; }
+        
+        /* Sandbox Viewport */
+        .output-container { flex: 1; background: #fff; position: relative; min-height: 30vh; }
+        iframe { width: 100%; height: 100%; border: none; background: #fff; }
+        
+        /* Link Signaling Control Deck */
+        .network-panel { background: #111116; border-top: 1px solid #222; padding: 10px 12px; }
+        .network-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+        .net-input { width: 85px; background: #161622; color: #39ff14; border: 1px solid #333; font-size: 15px; padding: 8px; border-radius: 4px; font-family: monospace; text-align: center; font-weight: bold; }
+        .room-display { font-size: 12px; color: #ffaa00; font-weight: bold; }
+        
+        /* Terminal Logs Matrix */
+        .memory-log { height: 14vh; background: #08080c; border-top: 1px solid #222; border-bottom: 1px solid #222; padding: 8px 12px; overflow-y: auto; font-size: 11px; color: #aaa; }
+        .log-entry { margin-bottom: 4px; border-left: 2px solid #39ff14; padding-left: 6px; line-height: 1.3; }
+        .log-entry.net { border-left-color: #ffaa00; color: #ffaa00; }
+        .log-entry.human { border-left-color: #a855f7; color: #a855f7; }
+        .log-entry.remote { border-left-color: #33b5ff; color: #33b5ff; }
+        .log-entry.sys { border-left-color: #64748b; color: #64748b; }
+
+        /* Control Panel & Mode Toggles */
+        .control-panel { height: 34vh; display: flex; flex-direction: column; background: #0f0f14; padding: 12px; gap: 8px; }
+        
+        .mode-selector { display: flex; background: #161622; border: 1px solid #2a2a35; border-radius: 4px; padding: 2px; }
+        .mode-btn { flex: 1; background: transparent; color: #888; border: none; padding: 8px; font-family: monospace; font-size: 10px; font-weight: bold; border-radius: 3px; cursor: pointer; text-transform: uppercase; transition: all 0.2s; }
+        .mode-btn.active { background: #222230; color: #39ff14; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .mode-btn[data-mode="local"].active { color: #fff; background: #2563eb; }
+        .mode-btn[data-mode="broadcast"].active { color: #000; background: #39ff14; }
+        .mode-btn[data-mode="telemetry"].active { color: #000; background: #33b5ff; }
+
+        textarea { flex: 1; background: #141418; color: #fff; border: 1px solid #2a2a35; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 13px; resize: none; outline: none; }
+        textarea:focus { border-color: #333; }
+        
+        button.action-btn { border: none; padding: 12px; font-weight: bold; font-size: 12px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
+        button.action-btn:active { opacity: 0.8; }
+        button.net-btn { background: #ffaa00; color: #000; padding: 8px 12px; }
+        button.join-btn { background: #00ff66; color: #000; }
+        button.execute-btn { background: #2563eb; color: #fff; font-size: 13px; width: 100%; }
+    </style>
+</head>
+<body>
+
+    <header>AZUBUIKE TECHNOLOGIES // SYMBIOTE RUNTIME v2.2.0</header>
+
+    <div class="output-container">
+        <iframe id="sandbox" sandbox="allow-scripts allow-modals"></iframe>
+    </div>
+
+    <div class="network-panel">
+        <div class="network-row">
+            <button id="init-peer" class="action-btn net-btn">Create Room</button>
+            <span id="room-id-view" class="room-display">PIN: ----</span>
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <input id="remote-pin" class="net-input" type="pattern" pattern="[0-9]*" inputmode="numeric" maxlength="4" placeholder="4-PIN">
+                <button id="connect-peer" class="action-btn join-btn">Join</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="memory-log" id="log-window">
+        <div class="log-entry sys">[SYS] Engine online. Built by Azubuike. Signaling paths armed.</div>
+    </div>
+
+    <div class="control-panel">
+        <div class="mode-selector">
+            <button class="mode-btn active" data-mode="local">Local Run</button>
+            <button class="mode-btn" data-mode="broadcast">Broadcast</button>
+            <button class="mode-btn" data-mode="telemetry">Telemetry</button>
+        </div>
+        
+        <textarea id="code-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Type script, components, or JSON runtime updates..."></textarea>
+        <button id="execute-action" class="action-btn execute-btn">Execute Local Sandbox</button>
+    </div>
+
+    <script>
+        var inputEl = document.getElementById('code-input');
+        var executeBtn = document.getElementById('execute-action');
+        var frame = document.getElementById('sandbox');
+        var logs = document.getElementById('log-window');
+        
+        var initBtn = document.getElementById('init-peer');
+        var connectBtn = document.getElementById('connect-peer');
+        var pinDisplay = document.getElementById('room-id-view');
+        var remotePinInput = document.getElementById('remote-pin');
+        var modeBtns = document.querySelectorAll('.mode-btn');
+
+        var localConnection, dataChannel, sseSource;
+        var activeRoomId = null;
+        var currentMode = 'local'; 
+        window.isHost = false; 
+
+        var sseBaseUrl = 'https://ntfy.sh/azubuike_symbiote_';
+        var rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+        function printLog(src, txt) {
+            var el = document.createElement('div');
+            el.className = 'log-entry ' + src.toLowerCase();
+            el.innerText = '[' + new Date().toLocaleTimeString() + '] [' + src + ']: ' + txt;
+            logs.appendChild(el);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        // Mode Navigation Control Handling Switcher
+        modeBtns.forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                modeBtns.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentMode = this.getAttribute('data-mode');
+                
+                if (currentMode === 'local') {
+                    executeBtn.innerText = "Execute Local Sandbox";
+                    executeBtn.style.background = "#2563eb";
+                    executeBtn.style.color = "#fff";
+                } else if (currentMode === 'broadcast') {
+                    executeBtn.innerText = "Broadcast UI Components";
+                    executeBtn.style.background = "#39ff14";
+                    executeBtn.style.color = "#000";
+                } else if (currentMode === 'telemetry') {
+                    executeBtn.innerText = "Inject State Telemetry (JSON)";
+                    executeBtn.style.background = "#33b5ff";
+                    executeBtn.style.color = "#000";
+                }
+            });
+        });
+
+        // Master Consolidated Unified Execution Button Trigger Routing
+        executeBtn.addEventListener('click', function() {
+            var rawPayload = inputEl.value.trim();
+            if (!rawPayload) return;
+
+            if (currentMode === 'local') {
+                frame.srcdoc = rawPayload;
+                printLog('SYS', 'Local sandbox environment update forced.');
+            } 
+            else if (currentMode === 'broadcast') {
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    dataChannel.send(rawPayload);
+                    frame.srcdoc = rawPayload;
+                    printLog('HUMAN', 'Dispatched structural visual layout component over link.');
+                } else {
+                    printLog('NET', 'Error: Broadcast failed. Symbio-Link line is inactive.');
+                }
+            } 
+            else if (currentMode === 'telemetry') {
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    try {
+                        JSON.parse(rawPayload); 
+                        dataChannel.send(rawPayload);
+                        printLog('HUMAN', 'Telemetry array state packet sent.');
+                    } catch(e) {
+                        printLog('SYS', 'Syntax Error: Telemetry payloads must be formatted as raw valid JSON.');
+                    }
+                } else {
+                    printLog('NET', 'Error: Telemetry transfer failed. Link line is down.');
+                }
+            }
+        });
+
+        // Pure HTTP Native Signaling Implementation Engine
+        function startNativeSignaling(roomId, onReady) {
+            printLog('NET', 'Connecting native text stream layers...');
+            sseSource = new EventSource(sseBaseUrl + roomId + '/sse');
+            
+            sseSource.onopen = function() {
+                printLog('NET', 'Tunnel registered. Room assigned PIN: ' + roomId);
+                if(onReady) onReady();
+            };
+
+            sseSource.onerror = function() {
+                printLog('NET', 'Stream connection interrupted. Auto-relinking...');
+            };
+
+            sseSource.onmessage = function(e) {
+                try {
+                    var rawData = JSON.parse(e.data);
+                    if (rawData && rawData.message) {
+                        var packet = JSON.parse(rawData.message);
+                        handleSignalingPacket(packet);
+                    }
+                } catch(err) {}
+            };
+        }
+
+        function broadcastPacket(roomId, packetData) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", sseBaseUrl + roomId, true);
+            xhr.setRequestHeader("Content-Type", "text/plain");
+            xhr.send(JSON.stringify(packetData));
+        }
+
+        initBtn.addEventListener('click', function() {
+            window.isHost = true;
+            activeRoomId = Math.floor(1000 + Math.random() * 9000).toString();
+            pinDisplay.innerText = 'PIN: ' + activeRoomId;
+            initBtn.disabled = true;
+
+            startNativeSignaling(activeRoomId, function() {
+                printLog('NET', 'Awaiting connection verification maps on room PIN: ' + activeRoomId);
+                
+                localConnection = new RTCPeerConnection(rtcConfig);
+                dataChannel = localConnection.createDataChannel("symbiote-stream");
+                setupChannelEvents(dataChannel);
+
+                localConnection.onicecandidate = function(e) {
+                    if (!e.candidate) {
+                        var payload = { origin: 'host', type: 'offer', sdp: btoa(JSON.stringify(localConnection.localDescription)) };
+                        broadcastPacket(activeRoomId, payload);
+                        printLog('NET', 'Dispatched configuration mappings offer.');
+                    }
+                };
+
+                localConnection.createOffer().then(function(desc) {
+                    return localConnection.setLocalDescription(desc);
+                });
+            });
+        });
+
+        connectBtn.addEventListener('click', function() {
+            var enteredPin = remotePinInput.value.trim();
+            if(enteredPin.length !== 4) {
+                printLog('NET', 'Validation Failure: Room PIN must be exactly 4 digits.');
+                return;
+            }
+            window.isHost = false;
+            activeRoomId = enteredPin;
+            connectBtn.disabled = true;
+
+            startNativeSignaling(activeRoomId, function() {
+                printLog('NET', 'Listening for Host structural maps on room PIN: ' + activeRoomId);
+            });
+        });
+
+        function handleSignalingPacket(packet) {
+            if (packet.type === 'offer' && !window.isHost && packet.origin === 'host') {
+                printLog('NET', 'Host fingerprint found. Building encryption answer...');
+                var decodedOffer = JSON.parse(atob(packet.sdp));
+                
+                localConnection = new RTCPeerConnection(rtcConfig);
+                localConnection.ondatachannel = function(e) {
+                    dataChannel = e.channel;
+                    setupChannelEvents(dataChannel);
+                };
+
+                localConnection.setRemoteDescription(new RTCSessionDescription(decodedOffer))
+                .then(function() { return localConnection.createAnswer(); })
+                .then(function(answer) { return localConnection.setLocalDescription(answer); });
+
+                localConnection.onicecandidate = function(e) {
+                    if (!e.candidate) {
+                        var payload = { origin: 'peer', type: 'answer', sdp: btoa(JSON.stringify(localConnection.localDescription)) };
+                        broadcastPacket(activeRoomId, payload);
+                        printLog('NET', 'Returned signed target handshake answer.');
+                    }
+                };
+            }
+            
+            if (packet.type === 'answer' && window.isHost && packet.origin === 'peer') {
+                printLog('NET', 'Handshake token validated from remote agent.');
+                var decodedAnswer = JSON.parse(atob(packet.sdp));
+                localConnection.setRemoteDescription(new RTCSessionDescription(decodedAnswer))
+                .then(function() {
+                    printLog('NET', 'Link confirmed. Disconnecting signaling channel server paths.');
+                    if(sseSource) sseSource.close();
+                });
+            }
+        }
+
+        function setupChannelEvents(channel) {
+            channel.onopen = function() { 
+                printLog('NET', 'SYMBIO-LINK HIGHWAY ESTABLISHED. Direct connection secure.'); 
+                if(!window.isHost && sseSource) sseSource.close(); 
+            };
+            channel.onclose = function() { printLog('NET', 'SYMBIO-LINK INTERRUPTED. Pipeline terminated.'); };
+            
+            channel.onmessage = function(e) {
+                var incomingData = e.data;
+                
+                if(incomingData.startsWith("{") || incomingData.includes('"action"')) {
+                    try {
+                        var parsedStateMove = JSON.parse(incomingData);
+                        frame.contentWindow.postMessage({ type: 'P2P_DATA', payload: parsedStateMove }, '*');
+                        printLog('REMOTE', 'Telemetry metrics array routed directly to viewport frame memory.');
+                    } catch(err) {
+                        frame.srcdoc = incomingData;
+                        printLog('REMOTE', 'Injected structural client layout changes.');
+                    }
+                } else {
+                    frame.srcdoc = incomingData;
+                    printLog('REMOTE', 'Injected structural client layout changes.');
+                }
+            };
+        }
+
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'SEND_P2P_DATA' && dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify(event.data.payload));
+            }
+        });
+    </script>
+</body>
+  </html>
+  
