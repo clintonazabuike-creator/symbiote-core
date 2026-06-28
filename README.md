@@ -37,5 +37,5 @@ To initialize Symbiote locally using **Acode** or any standard developmental wor
 
 1. Clone or save this repository's source code:
    ```bash
-   git clone [https://github.com/your-username/symbiote-core.git](https://github.com/your-username/symbiote-core.git)
+   git clone [https://clintonazabuike-creator.github.io/symbiote-core.git](https://github.com/clintonazabuike-creator/symbiote-core.git)
    
